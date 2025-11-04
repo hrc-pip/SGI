@@ -571,11 +571,12 @@
                         <div id="productDescriptionAnchor"></div>
                         <div class="pdp-catalog-block">
                             <div id="pdpDescription" class="pdp-container pdp-container-block">
-                                <div class="pdp-subtitle title-sm-default" id="productDescriptionHeading">
-                                    Descri&#231;&#227;o do artigo
-                                </div>
+                                
                                 <div class="row pdp-secondary-info">
                                     <div class="col-xs-12 col-sm-6">
+                                        <div class="pdp-subtitle title-sm-default" id="productDescriptionHeading">
+                                    Descri&#231;&#227;o do artigo
+                                </div>
                                         <div class="pdp-description-container" id="pdpDescriptionContainer">
                                             <div id="productDescription_350297639" class="pdp-description"
                                                 aria-labelledby="productDescriptionHeading">
@@ -601,21 +602,14 @@
                                     </div>
 
 
-                                    <!-- Aqui fica o toca discos 3D-->
-                                    <div class="additional-img-container col-sm-6 hidden-xs">
+                                    <div class="col-sm-6 hidden-xs">
 
-
-                                        <source media="(min-width: 1200px)" sizes="50vw"
-                                            srcset="https://cdn.laredoute.com/cdn-cgi/image/width=700,height=700,fit=pad,dpr=1/products/f/5/e/f5e56971dd29b3ee4dae2159241badbf.jpg" />
-                                        <source media="(min-width: 1024px)" sizes="50vw"
-                                            srcset="https://cdn.laredoute.com/cdn-cgi/image/width=550,height=550,fit=pad,dpr=1/products/f/5/e/f5e56971dd29b3ee4dae2159241badbf.jpg" />
-                                        <source media="(min-width: 758px)" sizes="50vw"
-                                            srcset="https://cdn.laredoute.com/cdn-cgi/image/width=450,height=450,fit=pad,dpr=1/products/f/5/e/f5e56971dd29b3ee4dae2159241badbf.jpg" />
-                                        <img src="https://cdn.laredoute.com/cdn-cgi/image/width=650,height=650,fit=pad,dpr=1/products/f/5/e/f5e56971dd29b3ee4dae2159241badbf.jpg"
-                                            width="640" height="640" class="additional-img img-block" decoding="async"
-                                            loading="lazy" fetchpriority="low" alt="Gira-discos LS 10, LENCO madeira"
-                                            title="">
+                                        <canvas id="three-canvas">
+    
+                                        </canvas>
                                     </div>
+
+
                                 </div>
                             </div>
                         </div>
@@ -1116,6 +1110,14 @@
             </footer>
         </div>
 
-        <script src="js/main.js"></script>
+    <script type="importmap">
+    {
+    "imports": {
+      "three": "/node_modules/three/build/three.module.js",
+      "three/addons/": "/node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
+    <script type="module" src="js/main.js"></script>
 </body>
 </html>
