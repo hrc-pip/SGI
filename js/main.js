@@ -6,11 +6,14 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 let cena = new THREE.Scene()
 window.cena = cena
 
+// Mixer reference (set when model loads)
+let gltfMixer = null
+
 // Criar Renderer
 const threeCanvas = document.getElementById('three-canvas');
 
 // Crie o renderer com antialias e pixel ratio do dispositivo para bordas mais nítidas
-let renderer = new THREE.WebGLRenderer({canvas: threeCanvas, antialias: true})
+let renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true })
 // Don't set size here — we'll size to the canvas parent so the model stays inside the product column
 renderer.setClearColor(0xffffff); // Cor de Fundo (Branco neste caso concreto)
 
@@ -110,32 +113,151 @@ new GLTFLoader().load(
         // Informação: 1 Unidade = 0.1m = 1 dm = 10 cm
         cena.add(gltf.scene)
 
-        // Ativar sombras em todas as malhas do modelo carregado para que projetem e recebam sombras
-        gltf.scene.traverse((obj) => {
-            if (obj.isMesh) {
-                obj.castShadow = true
-                obj.receiveShadow = true
-                // Garantir que o material seja atualizado se necessário
-                if (Array.isArray(obj.material)) {
-                    obj.material.forEach(m => { 
-                        if (m) {
-                            if (m.opacity < 1 || m.alphaMode === 'BLEND' || m.transmission > 0) {
-                                m.transparent = true;
-                                m.depthWrite = false;
-                            }
-                            m.needsUpdate = true;
-                        }
-                    })
-                } else if (obj.material) {
-                    // Corrigir transparência para materiais que devem ser translúcidos
-                    if (obj.material.opacity < 1 || obj.material.alphaMode === 'BLEND' || obj.material.transmission > 0) {
-                        obj.material.transparent = true;
-                        obj.material.depthWrite = false;
+    // Create a mixer for the model animations and map named clips
+    const mixer = new THREE.AnimationMixer(gltf.scene)
+    gltfMixer = mixer
+
+        // Find clips by exact names (as found in the glTF)
+        const clipCover = gltf.animations.find(c => c.name === 'Closing and opening cover')
+        const clipMoving = gltf.animations.find(c => c.name === 'Moving needle')
+        const clipIdle = gltf.animations.find(c => c.name === 'Needle idle')
+
+        const actionCover = clipCover ? mixer.clipAction(clipCover) : null
+        const actionMoving = clipMoving ? mixer.clipAction(clipMoving) : null
+        const actionIdle = clipIdle ? mixer.clipAction(clipIdle) : null
+
+        // Configure idle action to loop but don't start it yet
+        if (actionIdle) {
+            actionIdle.setLoop(THREE.LoopRepeat, Infinity)
+            actionIdle.clampWhenFinished = false
+            actionIdle.enabled = true
+        }
+
+        // configure a simple state
+        let spinning = false
+
+        // helper to play the cover animation once
+        function playCoverOnce() {
+            if (!actionCover) return
+            // Ensure other actions that target the same nodes are stopped/disabled
+            try { if (actionMoving) { actionMoving.stop(); actionMoving.reset(); actionMoving.enabled = false; } } catch (e) {}
+            try { if (actionIdle) { actionIdle.stop(); actionIdle.reset(); actionIdle.enabled = false; } } catch (e) {}
+
+            // Reset and play cover action from start, forcing full weight
+            try { actionCover.stop() } catch (e) {}
+            actionCover.reset()
+            actionCover.setLoop(THREE.LoopOnce, 0)
+            actionCover.clampWhenFinished = true
+            actionCover.enabled = true
+            actionCover.setEffectiveWeight(1)
+            actionCover.timeScale = 1
+            actionCover.play()
+        }
+
+        // helper to play the moving animation once; forward=true for forward, false for reverse
+        function playMovingOnce(forward = true) {
+            if (!actionMoving) return
+            // Ensure idle is stopped when we start the moving animation
+            if (actionIdle && actionIdle.isRunning()) {
+                actionIdle.stop()
+            }
+            // Ensure cover isn't interfering
+            try { if (actionCover) { actionCover.stop(); actionCover.reset(); actionCover.enabled = false; } } catch (e) {}
+
+            try { actionMoving.stop() } catch (e) {}
+            actionMoving.reset()
+            actionMoving.setLoop(THREE.LoopOnce, 0)
+            actionMoving.clampWhenFinished = true
+            actionMoving.enabled = true
+            actionMoving.setEffectiveWeight(1)
+            if (forward) {
+                actionMoving.timeScale = 1
+                actionMoving.play()
+            } else {
+                // play in reverse: set time to end and negative timescale
+                actionMoving.time = actionMoving.getClip().duration
+                actionMoving.timeScale = -1
+                actionMoving.play()
+            }
+        }
+
+        // When moving animation finishes, if it finished in forward direction, start idle looping
+        mixer.addEventListener('finished', (e) => {
+            // e.action is the action that finished
+            if (e.action === actionMoving) {
+                // If we finished forward (timescale > 0), start idle
+                if (actionMoving.timeScale > 0) {
+                    if (actionIdle) {
+                        actionIdle.reset()
+                        actionIdle.enabled = true
+                        actionIdle.timeScale = 1
+                        actionIdle.play()
                     }
-                    obj.material.needsUpdate = true
+                    spinning = true
+                } else {
+                    // finished in reverse
+                    spinning = false
                 }
             }
+            // If cover finished, nothing automatic to do
         })
+
+    // Raycaster + click handling to trigger animations
+        const raycaster = new THREE.Raycaster()
+        const pointer = new THREE.Vector2()
+
+        function findNamedAncestor(object) {
+            let cur = object
+            while (cur) {
+                if (cur.name && cur.name.length > 0) return cur.name
+                cur = cur.parent
+            }
+            return null
+        }
+
+        function onPointerDownForAnimation(event) {
+            if (!threeCanvas) return
+            const rect = threeCanvas.getBoundingClientRect()
+            pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+            pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+
+            raycaster.setFromCamera(pointer, camara)
+            const intersects = raycaster.intersectObjects(gltf.scene.children, true)
+            if (!intersects || intersects.length === 0) return
+            const hit = intersects[0]
+            const name = findNamedAncestor(hit.object)
+            if (!name) return
+
+            // Use exact glTF node names only
+            const coverNames = new Set(['Cube007'])
+            const pickupNames = new Set(['PickupBaseAttachment', 'VinylDisk'])
+
+            if (coverNames.has(name)) {
+                // play cover animation once
+                playCoverOnce()
+                return
+            }
+
+            if (pickupNames.has(name)) {
+                if (!spinning) {
+                    // play moving forward once, then start idle loop (handled in mixer.finished)
+                    playMovingOnce(true)
+                    // spinning will be set true in mixer finished handler
+                } else {
+                    // currently spinning: stop idle and play moving reversed once
+                    if (actionIdle && actionIdle.isRunning()) actionIdle.stop()
+                    playMovingOnce(false)
+                    // spinning will be set false in mixer finished handler
+                }
+            }
+        }
+
+        if (threeCanvas) {
+            threeCanvas.addEventListener('pointerdown', onPointerDownForAnimation, { passive: true })
+        }
+
+    // (debug globals removed)
+
 
         // Calcular o centro da caixa delimitadora do modelo e recentralizar os controlos/câmara
         try {
@@ -175,7 +297,7 @@ new GLTFLoader().load(
             controls.minDistance = Math.max(distance * 0.25, 0.05);
             controls.maxDistance = distance * 8;
 
-            console.log('Camera repositioned to:', camara.position, 'radius:', radius, 'distance:', distance);
+            // camera repositioned
         } catch (err) {
             console.warn('Could not compute model center or reposition camera:', err);
         }
@@ -183,33 +305,45 @@ new GLTFLoader().load(
 )
 
 // Renderizar/Animar
-{
-    let delta = 0;
-    let relogio = new THREE.Clock();
-    let latencia_minima = 1 / 60; // para 60 frames por segundo 
-    animar()
-    function animar() {
-        requestAnimationFrame(animar);
-        delta += relogio.getDelta();
 
-        if (delta < latencia_minima) return;
+let delta = 0;
+let relogio = new THREE.Clock();
+let latencia_minima = 1 / 60; // para 60 frames por segundo 
+animar()
+function animar() {
+    requestAnimationFrame(animar);
+    delta += relogio.getDelta();
 
-        // Atualize os helpers de luz, se existirem
-        cena.traverse((child) => {
-            if (child instanceof THREE.PointLightHelper || child instanceof THREE.SpotLightHelper || child instanceof THREE.DirectionalLightHelper) {
-                child.update();
-            }
-        });
+    if (delta < latencia_minima) return;
 
-        renderer.render(cena, camara)
+    // Atualize os helpers de luz, se existirem
+    cena.traverse((child) => {
+        if (child instanceof THREE.PointLightHelper || child instanceof THREE.SpotLightHelper || child instanceof THREE.DirectionalLightHelper) {
+            child.update();
+        }
+    });
 
-        delta = delta % latencia_minima;
+    // Update animations (if mixer was created when model loaded)
+    try {
+        if (gltfMixer) {
+            // advance mixer by the accumulated delta
+            gltfMixer.update(delta);
+        }
+    } catch (e) {
+        // ignore mixer update errors
+        // console.warn('mixer update error', e)
     }
+
+
+    renderer.render(cena, camara)
+
+    delta = delta % latencia_minima;
 }
 
 
 
-document.addEventListener('DOMContentLoaded', function() {
+
+document.addEventListener('DOMContentLoaded', function () {
     const swipeWrap = document.querySelector('.swipe-wrap');
     const swipeItems = swipeWrap.querySelectorAll('.swipe-item');
     const leftArrow = document.getElementById('leftArrow');
@@ -224,12 +358,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     showImage(currentIndex);
 
-    leftArrow.addEventListener('click', function() {
+    leftArrow.addEventListener('click', function () {
         currentIndex = (currentIndex > 0) ? currentIndex - 1 : swipeItems.length - 1;
         showImage(currentIndex);
     });
 
-    rightArrow.addEventListener('click', function() {
+    rightArrow.addEventListener('click', function () {
         currentIndex = (currentIndex < swipeItems.length - 1) ? currentIndex + 1 : 0;
         showImage(currentIndex);
     });
