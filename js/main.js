@@ -83,7 +83,7 @@ window.addEventListener('resize', resizeRendererToParent, { passive: true });
 resizeRendererToParent();
 
 new GLTFLoader().load(
-    './assets/models/RecordPlayer.glb',
+    '../assets/models/RecordPlayer.glb',
     function (gltf) {
         cena.add(gltf.scene)
 
@@ -277,6 +277,8 @@ function animar() {
 
 
 
+
+// Carrossel
 document.addEventListener('DOMContentLoaded', function () {
     const swipeWrap = document.querySelector('.swipe-wrap');
     const swipeItems = swipeWrap.querySelectorAll('.swipe-item');
